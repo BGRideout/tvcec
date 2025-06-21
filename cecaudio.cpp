@@ -1,0 +1,266 @@
+#include "cecaudio.h"
+#include <algorithm>
+#include <array>
+
+#include <QTimer>
+
+// cecloader.h uses std::cout _without_ including iosfwd or iostream
+// Furthermore is uses cout and not std::cout
+#include <iostream>
+using std::cout;
+using std::endl;
+#include <libcec/cecloader.h>
+
+CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_UNKNOWN), active_device_(CEC::CECDEVICE_UNKNOWN), log_level_(CEC::CEC_LOG_ERROR)
+{
+    cec_config.Clear();
+    cec_callbacks.Clear();
+
+    const std::string devicename("TVCECAudio");
+    devicename.copy(cec_config.strDeviceName, std::min(devicename.size(), static_cast<std::string::size_type>(LIBCEC_OSD_NAME_SIZE)) );
+
+    cec_config.clientVersion       = CEC::LIBCEC_VERSION_CURRENT;
+    cec_config.bActivateSource     = 0;
+    cec_config.callbacks           = nullptr;
+    cec_config.deviceTypes.Add(CEC::CEC_DEVICE_TYPE_AUDIO_SYSTEM);
+
+    cec_callbacks.commandReceived   = &commandReceived;
+    cec_callbacks.keyPress          = &on_keypress;
+    cec_callbacks.logMessage        = &logMessage;
+    cec_callbacks.alert             = &do_alert;
+    cec_callbacks.configurationChanged = &configurationChanged;
+    cec_callbacks.sourceActivated   = &sourceActivated;
+
+    timer_ = new QTimer();
+    connect(timer_, &QTimer::timeout, this, &CECAudio::timeAction);
+    //timer_->start(30000);
+}
+
+CECAudio::~CECAudio()
+{
+    timer_->stop();
+    delete timer_;
+
+    // Close down and cleanup
+    cec_adapter->Close();
+    UnloadLibCec(cec_adapter);
+}
+
+bool CECAudio::init()
+{
+    // Get a cec adapter by initialising the cec library
+    cec_adapter = LibCecInitialise(&cec_config);
+    if( !cec_adapter )
+    {
+        std::cerr << "Failed loading libcec.so\n";
+        return false;
+    }
+
+    //  Enable callbacks
+    cec_adapter->SetCallbacks(&cec_callbacks, this);
+
+    // Try to automatically determine the CEC devices
+    std::array<CEC::cec_adapter_descriptor,10> devices;
+    int8_t devices_found = cec_adapter->DetectAdapters(devices.data(), devices.size(), nullptr, true /*quickscan*/);
+    if( devices_found <= 0)
+    {
+        std::cerr << "Could not automatically determine the cec adapter devices\n";
+        UnloadLibCec(cec_adapter);
+        return false;
+    }
+
+    // Open a connection to the zeroth CEC device
+    if( !cec_adapter->Open(devices[0].strComName) )
+    {
+        std::cerr << "Failed to open the CEC device on port " << devices[0].strComName << std::endl;
+        UnloadLibCec(cec_adapter);
+        return false;
+    }
+    return true;
+}
+
+
+CEC::cec_power_status CECAudio::tv_power() const
+{
+    return tv_power_;
+}
+
+void CECAudio::setTv_power(CEC::cec_power_status newTv_power)
+{
+    if (tv_power_ == newTv_power)
+        return;
+    bool wasUnknown = tv_power_ == CEC::CEC_POWER_STATUS_UNKNOWN || tv_power_ == CEC::CEC_POWER_STATUS_STANDBY;
+    tv_power_ = newTv_power;
+    std::cout << "TV Power = " << tv_power_ << endl;
+    emit tv_powerChanged(tv_power_);
+
+    if (wasUnknown)
+    {
+        CEC::cec_logical_address active = cec_adapter->GetActiveSource();
+        setActive_device(active);
+    }
+}
+
+CEC::cec_logical_address CECAudio::active_device() const
+{
+    return active_device_;
+}
+
+void CECAudio::setActive_device(const CEC::cec_logical_address &newActive_device)
+{
+    if (active_device_ == newActive_device)
+        return;
+    active_device_ = newActive_device;
+    std::string osdname = cec_adapter->GetDeviceOSDName(active_device_);
+    if (tv_power_ != CEC::CEC_POWER_STATUS_ON)
+    {
+        CEC::cec_power_status tvpower = cec_adapter->GetDevicePowerStatus(CEC::CECDEVICE_TV);
+        setTv_power(tvpower);
+    }
+    std::cout << "Active device = " << active_device_ << " name = " << osdname << endl;;
+    emit active_deviceChanged(active_device_, osdname);
+}
+
+CEC::cec_log_level CECAudio::log_level() const
+{
+    return log_level_;
+}
+
+void CECAudio::setLog_level(CEC::cec_log_level newLog_level)
+{
+    log_level_ = newLog_level;
+}
+
+void CECAudio::commandReceived(const CEC::cec_command *command)
+{
+    std::cout << "***** command " << command->initiator << " " << command->destination << std::hex <<
+                 "  opcode=" << command->opcode << " (" << cec_adapter->ToString(command->opcode) << ")"<< endl;
+    std::cout << "      data[" << (uint)command->parameters.size << "]";
+    for (int ii = 0; ii < command->parameters.size; ii++)
+    {
+        std::cout << " " << std::hex << (uint)command->parameters.data[ii];
+    }
+    std::cout << endl;
+
+    switch (command->opcode)
+    {
+    case CEC::CEC_OPCODE_REPORT_POWER_STATUS:
+        if (command->initiator == CEC::CECDEVICE_TV)
+        {
+            setTv_power(static_cast<CEC::cec_power_status>(command->parameters.At(0)));
+        }
+        break;
+
+    case CEC::CEC_OPCODE_STANDBY:
+        setTv_power(CEC::CEC_POWER_STATUS_STANDBY);
+        setActive_device(CEC::CECDEVICE_UNKNOWN);
+        break;
+
+    case CEC::CEC_OPCODE_GIVE_DEVICE_POWER_STATUS:
+        if (command->initiator == CEC::CECDEVICE_TV && tv_power_ != CEC::CEC_POWER_STATUS_ON)
+        {
+            CEC::cec_power_status tvpower = cec_adapter->GetDevicePowerStatus(CEC::CECDEVICE_TV);
+            setTv_power(tvpower);
+        }
+        break;
+
+    case::CEC::CEC_OPCODE_ACTIVE_SOURCE:
+        setActive_device(fromPhysical(physicalFromParameters(command->parameters)));
+        break;
+
+    case CEC::CEC_OPCODE_SET_STREAM_PATH:
+        setActive_device(fromPhysical(physicalFromParameters(command->parameters)));
+        break;
+
+    case CEC::CEC_OPCODE_ROUTING_CHANGE:
+        setActive_device(fromPhysical(physicalFromParameters(command->parameters, 2)));
+        break;
+
+    default:
+        break;
+    }
+}
+
+void CECAudio::logMessage(const CEC::cec_log_message *message)
+{
+    if (message->level & log_level_)
+    {
+        std::cout << "Message (mask=" << std::hex << message->level << ")" << endl;
+        std::cout << message->message << endl;
+    }
+}
+
+void CECAudio::on_keypress(const CEC::cec_keypress *msg)
+{
+    std::cout << endl << "***** on_keypress: " << std::hex << msg->keycode << " duration " << std::dec << msg->duration << endl;
+
+    switch (msg->keycode)
+    {
+    case CEC::CEC_USER_CONTROL_CODE_VOLUME_UP:
+        emit volumeUp(msg->duration == 0);
+        std::cout << "!!!!! volume up " << (msg->duration == 0 ? "pressed" : "released") << endl;
+        break;
+
+    case CEC::CEC_USER_CONTROL_CODE_VOLUME_DOWN:
+        emit volumeDown(msg->duration == 0);
+        std::cout << "!!!!! volume down " << (msg->duration == 0 ? "pressed" : "released") << endl;
+        break;
+
+    case CEC::CEC_USER_CONTROL_CODE_MUTE:
+        if (msg->duration == 0)
+        {
+            emit toggleMute();
+            std::cout << "!!!!! toggle mute" << endl;
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+void CECAudio::configurationChanged(const CEC::libcec_configuration* configuration)
+{
+    std::cout << endl << "  *****  Configuration changed  *****" << endl;
+}
+
+void CECAudio::do_alert(const CEC::libcec_alert alert, const CEC::libcec_parameter param)
+{
+    std::cout << endl << "  ***** Alert!!!  *****" << endl;
+}
+
+void CECAudio::sourceActivated(const CEC::cec_logical_address logicalAddress, const uint8_t bActivated)
+{
+    std::cout << endl << "###### Source " << logicalAddress << (bActivated ? " activated " : " deactivated") << endl;
+    if (bActivated)
+    {
+        setActive_device(logicalAddress);
+    }
+}
+
+void CECAudio::timeAction()
+{
+    CEC::cec_logical_address active = cec_adapter->GetActiveSource();
+    CEC::cec_power_status tv = cec_adapter->GetDevicePowerStatus(CEC::CECDEVICE_TV);
+    std::cout << "Timed poll, Active source=" << active << " TV power=" << tv << endl;
+}
+
+CEC::cec_logical_address CECAudio::fromPhysical(uint16_t physical)
+{
+    CEC::cec_logical_address ret = CEC::CECDEVICE_UNKNOWN;
+    for (int ii = 0; ii < 15; ii++)
+    {
+        CEC::cec_logical_address logaddr = static_cast<CEC::cec_logical_address>(ii);
+        if (cec_adapter->GetDevicePhysicalAddress(logaddr) == physical)
+        {
+            ret = logaddr;
+            break;
+        }
+    }
+    return ret;
+}
+
+uint16_t CECAudio::physicalFromParameters(const CEC::cec_datapacket &parameters, int offset) const
+{
+    return (parameters.At(0 + offset) << 8) + parameters.At(1 + offset);
+}
