@@ -79,7 +79,10 @@ bool TVCEC::sendToWebsocket(const QJsonObject &msg)
 {
     QJsonDocument doc(msg);
     QByteArray txtmsg = doc.toJson(QJsonDocument::Compact);
-    qDebug() << txtmsg;
+    if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
+    {
+        qDebug() << txtmsg;
+    }
     time_t now;
     time(&now);
     if (!push_to_front_)
@@ -111,7 +114,10 @@ bool TVCEC::sendQueuedMessages()
         while (!msg_queue_.isEmpty())
         {
             qint64 sts = websocket_->sendTextMessage(msg_queue_.front().msg);
-            qDebug() << "Sent" << sts << "bytes of" << msg_queue_.front().msg.size();
+            if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
+            {
+                qDebug() << "Sent" << sts << "bytes of" << msg_queue_.front().msg.size();
+            }
             msg_queue_.pop_front();
         }
     }
@@ -147,7 +153,10 @@ void TVCEC::ws_disconnected()
 void TVCEC::ws_pong(quint64 elapsedTime, const QByteArray &payload)
 {
     health_ = 0;
-    qDebug() << "ping/pong elapsed msec:" <<elapsedTime;
+    if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
+    {
+        qDebug() << "ping/pong elapsed msec:" <<elapsedTime;
+    }
 }
 
 void TVCEC::healthCheck()

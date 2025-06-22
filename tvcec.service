@@ -1,0 +1,15 @@
+[Unit]
+Description=Consumer Electronics Control Interpreter
+After=network.target
+
+[Service]
+ExecStart=/home/bruce/Test/tvcec
+WorkingDirectory=/home/bruce/Test
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=bruce
+
+[Install]
+WantedBy=multi-user.target
+

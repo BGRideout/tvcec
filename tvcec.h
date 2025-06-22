@@ -36,6 +36,8 @@ public:
     explicit TVCEC(QObject *parent = nullptr);
     virtual ~TVCEC();
 
+    void setLogLevel(CEC::cec_log_level level) {cec_->setLog_level(level);}
+
 public slots:
     void tv_powerChanged(CEC::cec_power_status power);
     void active_deviceChanged(CEC::cec_logical_address logaddr, std::string name);

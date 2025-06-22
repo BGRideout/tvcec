@@ -2,8 +2,6 @@
 #include <algorithm>
 #include <array>
 
-#include <QTimer>
-
 // cecloader.h uses std::cout _without_ including iosfwd or iostream
 // Furthermore is uses cout and not std::cout
 #include <iostream>
@@ -30,17 +28,10 @@ CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_UNKNOWN), active_device_(
     cec_callbacks.alert             = &do_alert;
     cec_callbacks.configurationChanged = &configurationChanged;
     cec_callbacks.sourceActivated   = &sourceActivated;
-
-    timer_ = new QTimer();
-    connect(timer_, &QTimer::timeout, this, &CECAudio::timeAction);
-    //timer_->start(30000);
 }
 
 CECAudio::~CECAudio()
 {
-    timer_->stop();
-    delete timer_;
-
     // Close down and cleanup
     cec_adapter->Close();
     UnloadLibCec(cec_adapter);
@@ -91,7 +82,10 @@ void CECAudio::setTv_power(CEC::cec_power_status newTv_power)
         return;
     bool wasUnknown = tv_power_ == CEC::CEC_POWER_STATUS_UNKNOWN || tv_power_ == CEC::CEC_POWER_STATUS_STANDBY;
     tv_power_ = newTv_power;
-    std::cout << "TV Power = " << tv_power_ << endl;
+    if (log_level_ & CEC::CEC_LOG_DEBUG)
+    {
+        std::cout << "TV Power = " << tv_power_ << endl;
+    }
     emit tv_powerChanged(tv_power_);
 
     if (wasUnknown)
@@ -117,7 +111,10 @@ void CECAudio::setActive_device(const CEC::cec_logical_address &newActive_device
         CEC::cec_power_status tvpower = cec_adapter->GetDevicePowerStatus(CEC::CECDEVICE_TV);
         setTv_power(tvpower);
     }
-    std::cout << "Active device = " << active_device_ << " name = " << osdname << endl;;
+    if (log_level_ & CEC::CEC_LOG_DEBUG)
+    {
+        std::cout << "Active device = " << active_device_ << " name = " << osdname << endl;
+    }
     emit active_deviceChanged(active_device_, osdname);
 }
 
@@ -133,14 +130,17 @@ void CECAudio::setLog_level(CEC::cec_log_level newLog_level)
 
 void CECAudio::commandReceived(const CEC::cec_command *command)
 {
-    std::cout << "***** command " << command->initiator << " " << command->destination << std::hex <<
-                 "  opcode=" << command->opcode << " (" << cec_adapter->ToString(command->opcode) << ")"<< endl;
-    std::cout << "      data[" << (uint)command->parameters.size << "]";
-    for (int ii = 0; ii < command->parameters.size; ii++)
+    if (log_level() & CEC::CEC_LOG_NOTICE)
     {
-        std::cout << " " << std::hex << (uint)command->parameters.data[ii];
+        std::cout << "***** command " << command->initiator << " " << command->destination << std::hex <<
+                     "  opcode=" << command->opcode << " (" << cec_adapter->ToString(command->opcode) << ")"<< endl;
+        std::cout << "      data[" << (uint)command->parameters.size << "]";
+        for (int ii = 0; ii < command->parameters.size; ii++)
+        {
+            std::cout << " " << std::hex << (uint)command->parameters.data[ii];
+        }
+        std::cout << endl;
     }
-    std::cout << endl;
 
     switch (command->opcode)
     {
@@ -192,25 +192,37 @@ void CECAudio::logMessage(const CEC::cec_log_message *message)
 
 void CECAudio::on_keypress(const CEC::cec_keypress *msg)
 {
-    std::cout << endl << "***** on_keypress: " << std::hex << msg->keycode << " duration " << std::dec << msg->duration << endl;
+    if (log_level_ & CEC::CEC_LOG_DEBUG)
+    {
+        std::cout << endl << "***** on_keypress: " << std::hex << msg->keycode << " duration " << std::dec << msg->duration << endl;
+    }
 
     switch (msg->keycode)
     {
     case CEC::CEC_USER_CONTROL_CODE_VOLUME_UP:
         emit volumeUp(msg->duration == 0);
-        std::cout << "!!!!! volume up " << (msg->duration == 0 ? "pressed" : "released") << endl;
+        if (log_level_ & CEC::CEC_LOG_DEBUG)
+        {
+            std::cout << "!!!!! volume up " << (msg->duration == 0 ? "pressed" : "released") << endl;
+        }
         break;
 
     case CEC::CEC_USER_CONTROL_CODE_VOLUME_DOWN:
         emit volumeDown(msg->duration == 0);
-        std::cout << "!!!!! volume down " << (msg->duration == 0 ? "pressed" : "released") << endl;
+        if (log_level_ & CEC::CEC_LOG_DEBUG)
+        {
+            std::cout << "!!!!! volume down " << (msg->duration == 0 ? "pressed" : "released") << endl;
+        }
         break;
 
     case CEC::CEC_USER_CONTROL_CODE_MUTE:
         if (msg->duration == 0)
         {
             emit toggleMute();
-            std::cout << "!!!!! toggle mute" << endl;
+            if (log_level_ & CEC::CEC_LOG_DEBUG)
+            {
+                std::cout << "!!!!! toggle mute" << endl;
+            }
         }
         break;
 
@@ -221,7 +233,10 @@ void CECAudio::on_keypress(const CEC::cec_keypress *msg)
 
 void CECAudio::configurationChanged(const CEC::libcec_configuration* configuration)
 {
-    std::cout << endl << "  *****  Configuration changed  *****" << endl;
+    if (log_level_ & CEC::CEC_LOG_DEBUG)
+    {
+        std::cout << endl << "  *****  Configuration changed  *****" << endl;
+    }
 }
 
 void CECAudio::do_alert(const CEC::libcec_alert alert, const CEC::libcec_parameter param)
@@ -231,18 +246,14 @@ void CECAudio::do_alert(const CEC::libcec_alert alert, const CEC::libcec_paramet
 
 void CECAudio::sourceActivated(const CEC::cec_logical_address logicalAddress, const uint8_t bActivated)
 {
-    std::cout << endl << "###### Source " << logicalAddress << (bActivated ? " activated " : " deactivated") << endl;
+    if (log_level_ & CEC::CEC_LOG_DEBUG)
+    {
+        std::cout << endl << "###### Source " << logicalAddress << (bActivated ? " activated " : " deactivated") << endl;
+    }
     if (bActivated)
     {
         setActive_device(logicalAddress);
     }
-}
-
-void CECAudio::timeAction()
-{
-    CEC::cec_logical_address active = cec_adapter->GetActiveSource();
-    CEC::cec_power_status tv = cec_adapter->GetDevicePowerStatus(CEC::CECDEVICE_TV);
-    std::cout << "Timed poll, Active source=" << active << " TV power=" << tv << endl;
 }
 
 CEC::cec_logical_address CECAudio::fromPhysical(uint16_t physical)

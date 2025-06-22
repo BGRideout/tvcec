@@ -4,8 +4,6 @@
 #include <QObject>
 #include <libcec/cec.h>
 
-class QTimer;
-
 class CECAudio : public QObject
 {
     Q_OBJECT
@@ -18,7 +16,6 @@ private:
     CEC::cec_power_status       tv_power_;
     CEC::cec_logical_address    active_device_;
     CEC::cec_log_level          log_level_;
-    QTimer                      *timer_;
 
     void commandReceived(const CEC::cec_command* command);
     static void commandReceived(void* cbparam, const CEC::cec_command* command)
@@ -73,7 +70,7 @@ signals:
     void toggleMute();
 
 private slots:
-    void timeAction();
+
 };
 
 #endif // CECAUDIO_H
