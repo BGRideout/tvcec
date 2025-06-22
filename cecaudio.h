@@ -53,6 +53,10 @@ public:
 
     bool init();
 
+    CEC::cec_power_status getTVPower() const {return tv_power_;}
+    CEC::cec_logical_address getActiveAddress() const {return active_device_;}
+    std::string getActiveName() const {return cec_adapter->GetDeviceOSDName(active_device_);}
+
 public slots:
     CEC::cec_power_status tv_power() const;
     void setTv_power(CEC::cec_power_status newTv_power);

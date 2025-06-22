@@ -4,10 +4,12 @@
 #include <QJsonObject>
 #include <QJsonValue>
 
-TVCEC::TVCEC(QObject *parent) : QObject{parent}
+TVCEC::TVCEC(QObject *parent) : QObject{parent}, push_to_front_(false), health_(0)
 {
     websocket_ = new QWebSocket("tvcec");
-    connect(websocket_, &QWebSocket::connected, this, &TVCEC::sendQueuedMessages);
+    connect(websocket_, &QWebSocket::connected, this, &TVCEC::ws_connected);
+    connect(websocket_, &QWebSocket::disconnected, this, &TVCEC::ws_disconnected);
+    connect(websocket_, &QWebSocket::pong, this, &TVCEC::ws_pong);
 
     cec_ = new CECAudio();
     connect(cec_, &CECAudio::tv_powerChanged, this, &TVCEC::tv_powerChanged);
@@ -16,6 +18,10 @@ TVCEC::TVCEC(QObject *parent) : QObject{parent}
     connect(cec_, &CECAudio::volumeDown, this, &TVCEC::volumeDown);
     connect(cec_, &CECAudio::toggleMute, this, &TVCEC::toggleMute);
     cec_->init();
+
+    timer_ = new QTimer(this);
+    timer_->setInterval(30000);
+    connect(timer_, &QTimer::timeout, this, &TVCEC::healthCheck);
 }
 
 TVCEC::~TVCEC()
@@ -76,13 +82,30 @@ bool TVCEC::sendToWebsocket(const QJsonObject &msg)
     qDebug() << txtmsg;
     time_t now;
     time(&now);
-    msg_queue_.emplaceBack(now, QString(txtmsg));
-    return sendQueuedMessages();
+    if (!push_to_front_)
+    {
+        msg_queue_.emplaceBack(now, QString(txtmsg));
+        return sendQueuedMessages();
+    }
+    msg_queue_.emplaceFront(now, QString(txtmsg));
+    return true;
 }
 
 bool TVCEC::sendQueuedMessages()
 {
     bool ret = true;
+
+    //  Delete expired messages
+    time_t expire;
+    time(&expire);
+    expire -= 30;
+    while (!msg_queue_.isEmpty() && msg_queue_.front().queued < expire)
+    {
+        qDebug() << "Delete expired message" << msg_queue_.front().msg << "expired" << (expire - msg_queue_.front().queued);
+        msg_queue_.pop_front();
+        ret = false;
+    }
+
     if (websocket_->isValid())
     {
         while (!msg_queue_.isEmpty())
@@ -94,15 +117,49 @@ bool TVCEC::sendQueuedMessages()
     }
     else
     {
-        time_t expire;
-        time(&expire);
-        expire -= 30;
-        while (!msg_queue_.isEmpty() && msg_queue_.front().queued < expire)
-        {
-            msg_queue_.pop_front();
-            ret = false;
-        }
+        qDebug() << "Open websocket";
         websocket_->open(QUrl("ws://tvadapter.local"));
     }
     return ret;
+}
+
+void TVCEC::ws_connected()
+{
+    qDebug() << "Websocket connected";
+    // Push power status and active device to front of queue
+    push_to_front_ = true;
+    active_deviceChanged(cec_->getActiveAddress(), cec_->getActiveName());
+    tv_powerChanged(cec_->getTVPower());
+    push_to_front_ = false;
+    sendQueuedMessages();
+
+    health_ = 0;
+    timer_->start();
+}
+
+void TVCEC::ws_disconnected()
+{
+    qDebug() << "websocket disconnected";
+    timer_->stop();
+    health_ = 0;
+}
+
+void TVCEC::ws_pong(quint64 elapsedTime, const QByteArray &payload)
+{
+    health_ = 0;
+    qDebug() << "ping/pong elapsed msec:" <<elapsedTime;
+}
+
+void TVCEC::healthCheck()
+{
+    health_++;
+    if (health_ < 5)
+    {
+        websocket_->ping();
+    }
+    else
+    {
+        qDebug() << "Health check limit reached! Close websocket.";
+        websocket_->close();
+    }
 }
