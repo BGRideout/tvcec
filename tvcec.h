@@ -16,8 +16,12 @@ class TVCEC : public QObject
 private:
     CECAudio            *cec_;                  // CEC Audio device
 
+    QString             remote_;                // Remote IP address
     QWebSocket          *websocket_;            // Websocket to control device
     bool sendToWebsocket(const QJsonObject &msg);
+    bool sendButtonClick(const char *label);
+    bool sendButtonPress(const char *label);
+    bool sendButtonRelease(const char *label);
 
     struct MsgQueEntry
     {
@@ -36,6 +40,7 @@ public:
     explicit TVCEC(QObject *parent = nullptr);
     virtual ~TVCEC();
 
+    void setRemote(const QString &remote) {remote_ = remote;}
     void setLogLevel(CEC::cec_log_level level) {cec_->setLog_level(level);}
 
 public slots:
@@ -48,6 +53,7 @@ public slots:
 private slots:
     void healthCheck();
     bool sendQueuedMessages();
+    void textMessage(const QString &msg);
     void ws_connected();
     void ws_disconnected();
     void ws_pong(quint64 elapsedTime, const QByteArray &payload);

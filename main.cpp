@@ -20,6 +20,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    QString remote("tvremote.local");
     TVCEC *tvcec = new TVCEC();
     uint32_t log = CEC::CEC_LOG_ERROR;
     for (int ii = 1; ii < argc; ii++)
@@ -28,8 +29,10 @@ int main(int argc, char *argv[])
         if (strcmp(argv[ii], "-n") == 0) log |= CEC::CEC_LOG_NOTICE;
         if (strcmp(argv[ii], "-t") == 0) log |= CEC::CEC_LOG_TRAFFIC;
         if (strcmp(argv[ii], "-a") == 0) log |= CEC::CEC_LOG_ALL;
+        if (argv[ii][0] != '-') remote = argv[ii];
     }
     tvcec->setLogLevel(static_cast<CEC::cec_log_level>(log));
+    tvcec->setRemote(remote);
 
     int ret = a.exec();
 

@@ -6,9 +6,11 @@
 
 TVCEC::TVCEC(QObject *parent) : QObject{parent}, push_to_front_(false), health_(0)
 {
+    remote_ = "tvremote.local";
     websocket_ = new QWebSocket("tvcec");
     connect(websocket_, &QWebSocket::connected, this, &TVCEC::ws_connected);
     connect(websocket_, &QWebSocket::disconnected, this, &TVCEC::ws_disconnected);
+    connect(websocket_, &QWebSocket::textFrameReceived, this, &TVCEC::textMessage);
     connect(websocket_, &QWebSocket::pong, this, &TVCEC::ws_pong);
 
     cec_ = new CECAudio();
@@ -33,17 +35,22 @@ TVCEC::~TVCEC()
 void TVCEC::tv_powerChanged(CEC::cec_power_status power)
 {
     qDebug() << "Slot tv_powerChanged" << power;
-    QJsonObject msg;
-    msg.insert("function", QJsonValue("tv_powerChanged"));
-    msg.insert("power", QJsonValue(power));
-    sendToWebsocket(msg);
+    if (power == CEC::CEC_POWER_STATUS_ON)
+    {
+        sendButtonClick(("TVOn"));
+    }
+    else if (power == CEC::CEC_POWER_STATUS_STANDBY)
+    {
+        sendButtonClick(("TVOff"));
+    }
 }
 
 void TVCEC::active_deviceChanged(CEC::cec_logical_address logaddr, std::string name)
 {
     qDebug() << "Slot active_deviceChanged" << logaddr << name.c_str();
     QJsonObject msg;
-    msg.insert("function", QJsonValue("active_deviceChanged"));
+    msg.insert("func", QJsonValue("input_select"));
+    msg.insert("path", QJsonValue("/tvadapter"));
     msg.insert("address", QJsonValue(logaddr));
     msg.insert("osdname", QJsonValue(name.c_str()));
     sendToWebsocket(msg);
@@ -52,27 +59,34 @@ void TVCEC::active_deviceChanged(CEC::cec_logical_address logaddr, std::string n
 void TVCEC::volumeUp(bool pressed)
 {
     qDebug() << "Slot volumeUp" << pressed;
-    QJsonObject msg;
-    msg.insert("function", QJsonValue("volumeUp"));
-    msg.insert("pressed", QJsonValue(pressed));
-    sendToWebsocket(msg);
+    if (pressed)
+    {
+        sendButtonPress("Vol+");
+    }
+    else
+    {
+        sendButtonRelease("Vol+");
+    }
 }
 
 void TVCEC::volumeDown(bool pressed)
 {
     qDebug() << "Slot volumeDown" << pressed;
-    QJsonObject msg;
-    msg.insert("function", QJsonValue("volumeDown"));
-    msg.insert("pressed", QJsonValue(pressed));
-    sendToWebsocket(msg);
+    qDebug() << "Slot volumeUp" << pressed;
+    if (pressed)
+    {
+        sendButtonPress("Vol-");
+    }
+    else
+    {
+        sendButtonRelease("Vol-");
+    }
 }
 
 void TVCEC::toggleMute()
 {
     qDebug() << "Slot toggleMute";
-    QJsonObject msg;
-    msg.insert("function", QJsonValue("toggleMute"));
-    sendToWebsocket(msg);
+    sendButtonClick("Mute");
 }
 
 bool TVCEC::sendToWebsocket(const QJsonObject &msg)
@@ -92,6 +106,33 @@ bool TVCEC::sendToWebsocket(const QJsonObject &msg)
     }
     msg_queue_.emplaceFront(now, QString(txtmsg));
     return true;
+}
+
+bool TVCEC::sendButtonClick(const char *label)
+{
+    QJsonObject msg;
+    msg.insert("func", QJsonValue("tv_btn_click"));
+    msg.insert("path", QJsonValue("/tvadapter"));
+    msg.insert("button", QJsonValue(label));
+    return sendToWebsocket(msg);
+}
+
+bool TVCEC::sendButtonPress(const char *label)
+{
+    QJsonObject msg;
+    msg.insert("func", QJsonValue("tv_btn_press"));
+    msg.insert("path", QJsonValue("/tvadapter"));
+    msg.insert("button", QJsonValue(label));
+    return sendToWebsocket(msg);
+}
+
+bool TVCEC::sendButtonRelease(const char *label)
+{
+    QJsonObject msg;
+    msg.insert("func", QJsonValue("tv_btn_release"));
+    msg.insert("path", QJsonValue("/tvadapter"));
+    msg.insert("button", QJsonValue(label));
+    return sendToWebsocket(msg);
 }
 
 bool TVCEC::sendQueuedMessages()
@@ -124,14 +165,22 @@ bool TVCEC::sendQueuedMessages()
     else
     {
         qDebug() << "Open websocket";
-        websocket_->open(QUrl("ws://tvadapter.local"));
+        websocket_->open(QUrl("ws://" + remote_ + "/tvcec"));
     }
     return ret;
 }
 
+void TVCEC::textMessage(const QString &msg)
+{
+    if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
+    {
+        qDebug() << "Received:" << msg;
+    }
+}
+
 void TVCEC::ws_connected()
 {
-    qDebug() << "Websocket connected";
+    qDebug() << "Websocket connected" << websocket_->requestUrl();
     // Push power status and active device to front of queue
     push_to_front_ = true;
     active_deviceChanged(cec_->getActiveAddress(), cec_->getActiveName());
