@@ -18,6 +18,7 @@ private:
 
     QString             remote_;                // Remote IP address
     QWebSocket          *websocket_;            // Websocket to control device
+
     bool sendToWebsocket(const QJsonObject &msg);
     bool sendButtonClick(const char *label);
     bool sendButtonPress(const char *label);
@@ -35,6 +36,7 @@ private:
 
     QTimer              *timer_;                // Timer for health check
     int                 health_;                // Health counter
+    bool                just_on_;               // Just powered on flag
 
 public:
     explicit TVCEC(QObject *parent = nullptr);

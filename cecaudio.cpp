@@ -1,6 +1,7 @@
 #include "cecaudio.h"
 #include <algorithm>
 #include <array>
+#include <QtDebug>
 
 // cecloader.h uses std::cout _without_ including iosfwd or iostream
 // Furthermore is uses cout and not std::cout
@@ -9,7 +10,7 @@ using std::cout;
 using std::endl;
 #include <libcec/cecloader.h>
 
-CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_UNKNOWN), active_device_(CEC::CECDEVICE_UNKNOWN), log_level_(CEC::CEC_LOG_ERROR)
+CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(CEC::CECDEVICE_UNKNOWN), log_level_(CEC::CEC_LOG_ERROR)
 {
     cec_config.Clear();
     cec_callbacks.Clear();
@@ -67,6 +68,11 @@ bool CECAudio::init()
         UnloadLibCec(cec_adapter);
         return false;
     }
+
+    //  Get the power and active source
+    tv_power_ = getTVPower();
+    active_device_ = getActiveAddress();
+    qDebug() << "CECAudio initialized. tv_power_" << tv_power_ << "active_device_" << active_device_;
     return true;
 }
 
@@ -80,19 +86,12 @@ void CECAudio::setTv_power(CEC::cec_power_status newTv_power)
 {
     if (tv_power_ == newTv_power)
         return;
-    bool wasUnknown = tv_power_ == CEC::CEC_POWER_STATUS_UNKNOWN || tv_power_ == CEC::CEC_POWER_STATUS_STANDBY;
     tv_power_ = newTv_power;
     if (log_level_ & CEC::CEC_LOG_DEBUG)
     {
         std::cout << "TV Power = " << tv_power_ << endl;
     }
     emit tv_powerChanged(tv_power_);
-
-    if (wasUnknown)
-    {
-        CEC::cec_logical_address active = cec_adapter->GetActiveSource();
-        setActive_device(active);
-    }
 }
 
 CEC::cec_logical_address CECAudio::active_device() const
