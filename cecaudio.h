@@ -17,9 +17,18 @@ private:
     CEC::cec_logical_address    active_device_;
     CEC::cec_log_level          log_level_;
 
+    int                         volume_;
+    bool                        muted_;
+
+    uint8_t audioStatus() const;
+
     void commandReceived(const CEC::cec_command* command);
     static void commandReceived(void* cbparam, const CEC::cec_command* command)
                 {static_cast<CECAudio *>(cbparam)->commandReceived(command);}
+
+    int commandHandler(const CEC::cec_command* command);
+    static int commandHandler(void* cbparam, const CEC::cec_command* command)
+                {return static_cast<CECAudio *>(cbparam)->commandHandler(command);}
 
     void logMessage(const CEC::cec_log_message* message);
     static void logMessage(void* cbparam, const CEC::cec_log_message* message)
@@ -61,6 +70,9 @@ public slots:
     void setActive_device(const CEC::cec_logical_address &newActive_device);
     CEC::cec_log_level log_level() const;
     void setLog_level(CEC::cec_log_level newLog_level);
+
+    void setVolume(int volume) { volume_ = volume; }
+    void setMuted(bool muted) { muted_ = muted; }
 
 signals:
     void tv_powerChanged(CEC::cec_power_status power);

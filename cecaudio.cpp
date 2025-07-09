@@ -10,7 +10,8 @@ using std::cout;
 using std::endl;
 #include <libcec/cecloader.h>
 
-CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(CEC::CECDEVICE_UNKNOWN), log_level_(CEC::CEC_LOG_ERROR)
+CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(CEC::CECDEVICE_UNKNOWN),
+    log_level_(CEC::CEC_LOG_ERROR), volume_(60), muted_(false)
 {
     cec_config.Clear();
     cec_callbacks.Clear();
@@ -24,6 +25,7 @@ CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(
     cec_config.deviceTypes.Add(CEC::CEC_DEVICE_TYPE_AUDIO_SYSTEM);
 
     cec_callbacks.commandReceived   = &commandReceived;
+    cec_callbacks.commandHandler    = &commandHandler;
     cec_callbacks.keyPress          = &on_keypress;
     cec_callbacks.logMessage        = &logMessage;
     cec_callbacks.alert             = &do_alert;
@@ -34,8 +36,11 @@ CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(
 CECAudio::~CECAudio()
 {
     // Close down and cleanup
-    cec_adapter->Close();
-    UnloadLibCec(cec_adapter);
+    if (cec_adapter)
+    {
+        cec_adapter->Close();
+        UnloadLibCec(cec_adapter);
+    }
 }
 
 bool CECAudio::init()
@@ -127,16 +132,47 @@ void CECAudio::setLog_level(CEC::cec_log_level newLog_level)
     log_level_ = newLog_level;
 }
 
+uint8_t CECAudio::audioStatus() const
+{
+    uint8_t ret = 0;
+    int vol = volume_;
+    if (vol < CEC::CEC_AUDIO_VOLUME_MIN)
+    {
+        vol = CEC::CEC_AUDIO_VOLUME_MIN;
+    }
+    if (vol > CEC::CEC_AUDIO_VOLUME_MAX)
+    {
+        vol = CEC::CEC_AUDIO_VOLUME_MAX;
+    }
+    ret |= static_cast<uint8_t>(vol) & CEC::CEC_AUDIO_VOLUME_STATUS_MASK;
+    if (muted_)
+    {
+        ret |= CEC::CEC_AUDIO_MUTE_STATUS_MASK;
+    }
+    return ret;
+}
+
 void CECAudio::commandReceived(const CEC::cec_command *command)
 {
+    //  Moved to commandHandler for libcec v7
+}
+
+int CECAudio::commandHandler(const CEC::cec_command *command)
+{
+    int ret = 0;
+    CEC::cec_command response;
+
     if (log_level() & CEC::CEC_LOG_NOTICE)
     {
-        std::cout << "***** command " << command->initiator << " " << command->destination << std::hex <<
-                     "  opcode=" << command->opcode << " (" << cec_adapter->ToString(command->opcode) << ")"<< endl;
-        std::cout << "      data[" << (uint)command->parameters.size << "]";
-        for (int ii = 0; ii < command->parameters.size; ii++)
+        std::cout << "***** commandHandler " << command->initiator << " " << command->destination << std::hex <<
+                     "  opcode=" << command->opcode << " (" << cec_adapter->ToString(command->opcode) << ")";
+        if (command->parameters.size > 0)
         {
-            std::cout << " " << std::hex << (uint)command->parameters.data[ii];
+            std::cout << " data[" << (uint)command->parameters.size << "]";
+            for (int ii = 0; ii < command->parameters.size; ii++)
+            {
+                std::cout << " " << std::hex << (uint)command->parameters.data[ii];
+            }
         }
         std::cout << endl;
     }
@@ -175,9 +211,35 @@ void CECAudio::commandReceived(const CEC::cec_command *command)
         setActive_device(fromPhysical(physicalFromParameters(command->parameters, 2)));
         break;
 
+    case CEC::CEC_OPCODE_GIVE_AUDIO_STATUS:
+        response.Format(response, command->destination, command->initiator, command->GetResponseOpcode(command->opcode));
+        response.PushBack(audioStatus());
+        if (cec_adapter->Transmit(response))
+        {
+            ret = 1;
+        }
+        break;
+
     default:
         break;
     }
+
+    if ((log_level() & CEC::CEC_LOG_NOTICE) != 0 && ret == 1)
+    {
+        std::cout << "***** commandHandler response " << response.initiator << " " << response.destination << std::hex <<
+                     "  opcode=" << response.opcode << " (" << cec_adapter->ToString(response.opcode) << ")";
+        if (response.parameters.size > 0)
+        {
+            std::cout << " data[" << (uint)response.parameters.size << "]";
+            for (int ii = 0; ii < response.parameters.size; ii++)
+            {
+                std::cout << " " << std::hex << (uint)response.parameters.data[ii];
+            }
+        }
+        std::cout << endl;
+    }
+
+    return ret;
 }
 
 void CECAudio::logMessage(const CEC::cec_log_message *message)

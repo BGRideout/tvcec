@@ -19,6 +19,12 @@ private:
     QString             remote_;                // Remote IP address
     QWebSocket          *websocket_;            // Websocket to control device
 
+    QTimer              *volTimer_;             // Volume key timer
+    int                 volume_;                // Volume
+    int                 volCountAdj_;           // Volume count adjustment
+    bool                muted_;                 // Sound muted
+    void adjustVolume(const QString &func, int repeat);
+
     bool sendToWebsocket(const QJsonObject &msg);
     bool sendButtonClick(const char *label);
     bool sendButtonPress(const char *label);
@@ -42,6 +48,8 @@ public:
     explicit TVCEC(QObject *parent = nullptr);
     virtual ~TVCEC();
 
+    bool init();
+
     void setRemote(const QString &remote) {remote_ = remote;}
     void setLogLevel(CEC::cec_log_level level) {cec_->setLog_level(level);}
 
@@ -50,6 +58,7 @@ public slots:
     void active_deviceChanged(CEC::cec_logical_address logaddr, std::string name);
     void volumeUp(bool pressed);
     void volumeDown(bool pressed);
+    void setMuted(bool muted);
     void toggleMute();
 
 private slots:
@@ -61,7 +70,8 @@ private slots:
     void ws_pong(quint64 elapsedTime, const QByteArray &payload);
 
 signals:
-
+    void volumeChanged(int volume);
+    void mutingChanged(bool muted);
 };
 
 #endif // TVCEC_H

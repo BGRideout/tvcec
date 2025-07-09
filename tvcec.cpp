@@ -3,8 +3,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <iostream>
 
-TVCEC::TVCEC(QObject *parent) : QObject{parent}, push_to_front_(false), health_(0), just_on_(false)
+TVCEC::TVCEC(QObject *parent) : QObject{parent}, volume_(60), volCountAdj_(0), push_to_front_(false), health_(0), just_on_(false)
 {
     remote_ = "tvremote.local";
     websocket_ = new QWebSocket("tvcec");
@@ -19,17 +20,27 @@ TVCEC::TVCEC(QObject *parent) : QObject{parent}, push_to_front_(false), health_(
     connect(cec_, &CECAudio::volumeUp, this, &TVCEC::volumeUp, Qt::QueuedConnection);
     connect(cec_, &CECAudio::volumeDown, this, &TVCEC::volumeDown, Qt::QueuedConnection);
     connect(cec_, &CECAudio::toggleMute, this, &TVCEC::toggleMute, Qt::QueuedConnection);
-    cec_->init();
+    connect(this, &TVCEC::volumeChanged, cec_, &CECAudio::setVolume);
+    connect(this, &TVCEC::mutingChanged, cec_, &CECAudio::setMuted);
 
     timer_ = new QTimer(this);
     timer_->setInterval(30000);
     connect(timer_, &QTimer::timeout, this, &TVCEC::healthCheck);
+
+    volTimer_ = new QTimer(this);
+    volTimer_->setInterval(3000);
+    volTimer_->setSingleShot(true);
 }
 
 TVCEC::~TVCEC()
 {
     delete cec_;
     delete websocket_;
+}
+
+bool TVCEC::init()
+{
+    return cec_->init();
 }
 
 void TVCEC::tv_powerChanged(CEC::cec_power_status power)
@@ -73,9 +84,15 @@ void TVCEC::volumeUp(bool pressed)
     {
         qDebug() << "Slot volumeUp" << pressed;
     }
+    setMuted(false);
     if (pressed)
     {
         sendButtonPress("Vol+");
+        if (!volTimer_->isActive())
+        {
+            volTimer_->start();
+            volCountAdj_ = 1;
+        }
     }
     else
     {
@@ -89,9 +106,15 @@ void TVCEC::volumeDown(bool pressed)
     {
         qDebug() << "Slot volumeDown" << pressed;
     }
+    setMuted(false);
     if (pressed)
     {
         sendButtonPress("Vol-");
+        if (!volTimer_->isActive())
+        {
+            volTimer_->start();
+            volCountAdj_ = 1;
+        }
     }
     else
     {
@@ -105,7 +128,50 @@ void TVCEC::toggleMute()
     {
         qDebug() << "Slot toggleMute";
     }
+    setMuted(!muted_);
     sendButtonClick("Mute");
+}
+
+void TVCEC::adjustVolume(const QString &func, int repeat)
+{
+    setMuted(false);
+    if (volTimer_->isActive() && volCountAdj_ > 0)
+    {
+        repeat -= volCountAdj_;
+        if (repeat < 0) repeat = 0;
+    }
+    else
+    {
+        if (repeat == 0) repeat = 1;
+    }
+    int adj = (repeat + 1) / 2;
+    volCountAdj_ = 0;
+
+    if (func == "Vol+")
+    {
+        volume_ += adj;
+    }
+    else if (func == "Vol-")
+    {
+        volume_ -= adj;
+    }
+    if (volume_ < 0) volume_ = 0;
+    if (volume_ > 100) volume_ = 100;
+
+    emit volumeChanged(volume_);
+    if (cec_->log_level() & CEC::CEC_LOG_NOTICE)
+    {
+        std::cout << std::dec << "Volume adjusted by " << adj << " (" << repeat << ") to " << volume_ << std::endl;
+    }
+}
+
+void TVCEC::setMuted(bool muted)
+{
+    if (muted != muted_)
+    {
+        muted_ = muted;
+        emit mutingChanged(muted_);
+    }
 }
 
 bool TVCEC::sendToWebsocket(const QJsonObject &msg)
@@ -191,9 +257,29 @@ bool TVCEC::sendQueuedMessages()
 
 void TVCEC::textMessage(const QString &msg)
 {
+    QJsonDocument json = QJsonDocument::fromJson(msg.toUtf8());
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
         qDebug() << "Received:" << msg;
+    }
+    QJsonValue lbl = json.object().value("label");
+    if (lbl.isString())
+    {
+        QString label = lbl.toString();
+        if (label == "Vol+" || label == "Vol-")
+        {
+            QJsonValue rep = json.object().value("repetitions");
+            if(!rep.isUndefined())
+            {
+                int repeat = rep.toString().toInt();
+                adjustVolume(label, repeat);
+            }
+        }
+        else if (label == "Mute")
+        {
+            // Already done in response to CEC
+            // setMuted(!muted_);
+        }
     }
 }
 

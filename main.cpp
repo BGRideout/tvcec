@@ -11,6 +11,7 @@ void handle_signal(int signal)
 
 int main(int argc, char *argv[])
 {
+    int ret =  1;
     QCoreApplication a(argc, argv);
 
     // Install the ctrl-C signal handler
@@ -33,8 +34,10 @@ int main(int argc, char *argv[])
     }
     tvcec->setLogLevel(static_cast<CEC::cec_log_level>(log));
     tvcec->setRemote(remote);
-
-    int ret = a.exec();
+    if (tvcec->init())
+    {
+        ret = a.exec();
+    }
 
     delete tvcec;
 
