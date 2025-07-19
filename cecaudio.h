@@ -2,6 +2,8 @@
 #define CECAUDIO_H
 
 #include <QObject>
+#include <QMutex>
+#include <QTimer>
 #include <libcec/cec.h>
 
 class CECAudio : public QObject
@@ -20,7 +22,13 @@ private:
     int                         volume_;
     bool                        muted_;
 
+    QTimer                      *audio_timer_;
+    uint8_t                     last_audio_status_;
+    mutable QMutex              audioMtx1_;
+    mutable QMutex              audioMtx2_;
+
     uint8_t audioStatus() const;
+    int sendAudioStatus(CEC::cec_logical_address destination=CEC::CECDEVICE_TV);
 
     void commandReceived(const CEC::cec_command* command);
     static void commandReceived(void* cbparam, const CEC::cec_command* command)
@@ -53,6 +61,8 @@ private:
     CEC::cec_logical_address fromPhysical(uint16_t physical);
     uint16_t physicalFromParameters(const CEC::cec_datapacket &parameters, int offset = 0) const;
 
+    void logResponse(const char *label, const CEC::cec_command &response);
+
 public:
     CECAudio();
     virtual ~CECAudio();
@@ -71,8 +81,8 @@ public slots:
     CEC::cec_log_level log_level() const;
     void setLog_level(CEC::cec_log_level newLog_level);
 
-    void setVolume(int volume) { volume_ = volume; }
-    void setMuted(bool muted) { muted_ = muted; }
+    void setVolume(int volume);
+    void setMuted(bool muted);
 
 signals:
     void tv_powerChanged(CEC::cec_power_status power);
@@ -80,9 +90,10 @@ signals:
     void volumeUp(bool pressed);
     void volumeDown(bool pressed);
     void toggleMute();
+    void triggerVolumeTimer();
 
 private slots:
-
+    void audio_status_timeout();
 };
 
 #endif // CECAUDIO_H

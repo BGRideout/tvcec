@@ -1,6 +1,7 @@
 #include "cecaudio.h"
 #include <algorithm>
 #include <array>
+#include <QMutexLocker>
 #include <QtDebug>
 
 // cecloader.h uses std::cout _without_ including iosfwd or iostream
@@ -31,6 +32,12 @@ CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(
     cec_callbacks.alert             = &do_alert;
     cec_callbacks.configurationChanged = &configurationChanged;
     cec_callbacks.sourceActivated   = &sourceActivated;
+
+    audio_timer_ = new QTimer(this);
+    audio_timer_->setInterval(500);
+    audio_timer_->setSingleShot(true);
+    connect(audio_timer_, &QTimer::timeout, this, &CECAudio::audio_status_timeout);
+    connect(this, &CECAudio::triggerVolumeTimer, audio_timer_, qOverload<>(&QTimer::start));
 }
 
 CECAudio::~CECAudio()
@@ -132,8 +139,30 @@ void CECAudio::setLog_level(CEC::cec_log_level newLog_level)
     log_level_ = newLog_level;
 }
 
+void CECAudio::setVolume(int volume)
+{
+    QMutexLocker lk(&audioMtx1_);
+    volume_ = volume;
+}
+
+void CECAudio::setMuted(bool muted)
+{
+    QMutexLocker lk(&audioMtx1_);
+    muted_ = muted;
+}
+
+void CECAudio::audio_status_timeout()
+{
+    uint8_t status = audioStatus();
+    if (status != last_audio_status_)
+    {
+        sendAudioStatus();
+    }
+}
+
 uint8_t CECAudio::audioStatus() const
 {
+    QMutexLocker lk(&audioMtx1_);
     uint8_t ret = 0;
     int vol = volume_;
     if (vol < CEC::CEC_AUDIO_VOLUME_MIN)
@@ -152,6 +181,19 @@ uint8_t CECAudio::audioStatus() const
     return ret;
 }
 
+int CECAudio::sendAudioStatus(CEC::cec_logical_address destination)
+{
+    QMutexLocker lk(&audioMtx2_);
+    last_audio_status_ = audioStatus();
+    CEC::cec_command response;
+    response.Format(response, CEC::CECDEVICE_AUDIOSYSTEM, destination, CEC::CEC_OPCODE_REPORT_AUDIO_STATUS);
+    response.PushBack(last_audio_status_);
+    int ret = cec_adapter->Transmit(response);
+    emit triggerVolumeTimer();
+    logResponse("sendAudioStatus", response);
+    return ret;
+}
+
 void CECAudio::commandReceived(const CEC::cec_command *command)
 {
     //  Moved to commandHandler for libcec v7
@@ -160,7 +202,6 @@ void CECAudio::commandReceived(const CEC::cec_command *command)
 int CECAudio::commandHandler(const CEC::cec_command *command)
 {
     int ret = 0;
-    CEC::cec_command response;
 
     if (log_level() & CEC::CEC_LOG_NOTICE)
     {
@@ -212,31 +253,11 @@ int CECAudio::commandHandler(const CEC::cec_command *command)
         break;
 
     case CEC::CEC_OPCODE_GIVE_AUDIO_STATUS:
-        response.Format(response, command->destination, command->initiator, command->GetResponseOpcode(command->opcode));
-        response.PushBack(audioStatus());
-        if (cec_adapter->Transmit(response))
-        {
-            ret = 1;
-        }
+        ret = sendAudioStatus(command->initiator);
         break;
 
     default:
         break;
-    }
-
-    if ((log_level() & CEC::CEC_LOG_NOTICE) != 0 && ret == 1)
-    {
-        std::cout << "***** commandHandler response " << response.initiator << " " << response.destination << std::hex <<
-                     "  opcode=" << response.opcode << " (" << cec_adapter->ToString(response.opcode) << ")";
-        if (response.parameters.size > 0)
-        {
-            std::cout << " data[" << (uint)response.parameters.size << "]";
-            for (int ii = 0; ii < response.parameters.size; ii++)
-            {
-                std::cout << " " << std::hex << (uint)response.parameters.data[ii];
-            }
-        }
-        std::cout << endl;
     }
 
     return ret;
@@ -335,4 +356,22 @@ CEC::cec_logical_address CECAudio::fromPhysical(uint16_t physical)
 uint16_t CECAudio::physicalFromParameters(const CEC::cec_datapacket &parameters, int offset) const
 {
     return (parameters.At(0 + offset) << 8) + parameters.At(1 + offset);
+}
+
+void CECAudio::logResponse(const char *label, const CEC::cec_command &response)
+{
+    if ((log_level() & CEC::CEC_LOG_NOTICE) != 0)
+    {
+        std::cout << "***** " << label << " response ***** from " << response.initiator << " to " << response.destination << std::hex <<
+                     "  opcode=" << response.opcode << " (" << cec_adapter->ToString(response.opcode) << ")";
+        if (response.parameters.size > 0)
+        {
+            std::cout << " data[" << (uint)response.parameters.size << "]";
+            for (int ii = 0; ii < response.parameters.size; ii++)
+            {
+                std::cout << " " << std::hex << (uint)response.parameters.data[ii];
+            }
+        }
+        std::cout << endl;
+    }
 }
