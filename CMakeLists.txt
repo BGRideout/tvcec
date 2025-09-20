@@ -17,6 +17,7 @@ add_executable(tvcec
   main.cpp
   cecaudio.h cecaudio.cpp
   tvcec.h tvcec.cpp
+  ceclog.h ceclog.cpp
 )
 target_link_libraries(tvcec
     Qt${QT_VERSION_MAJOR}::Core

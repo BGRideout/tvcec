@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QWebSocket>
 #include "cecaudio.h"
+#include "ceclog.h"
 #include <time.h>
 
 class TVCEC : public QObject
@@ -15,6 +16,7 @@ class TVCEC : public QObject
 
 private:
     CECAudio            *cec_;                  // CEC Audio device
+    CECLog              *log_;                  // Logger
 
     QString             remote_;                // Remote IP address
     QWebSocket          *websocket_;            // Websocket to control device
@@ -42,7 +44,6 @@ private:
 
     QTimer              *timer_;                // Timer for health check
     int                 health_;                // Health counter
-    bool                just_on_;               // Just powered on flag
 
 public:
     explicit TVCEC(QObject *parent = nullptr);
@@ -52,6 +53,7 @@ public:
 
     void setRemote(const QString &remote) {remote_ = remote;}
     void setLogLevel(CEC::cec_log_level level) {cec_->setLog_level(level);}
+    void setLogFile(const char *filename) {log_->setLogFile(filename);}
 
 public slots:
     void tv_powerChanged(CEC::cec_power_status power);

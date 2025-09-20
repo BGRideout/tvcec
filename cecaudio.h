@@ -6,6 +6,8 @@
 #include <QTimer>
 #include <libcec/cec.h>
 
+class CECLog;
+
 class CECAudio : public QObject
 {
     Q_OBJECT
@@ -26,6 +28,8 @@ private:
     uint8_t                     last_audio_status_;
     mutable QMutex              audioMtx1_;
     mutable QMutex              audioMtx2_;
+
+    CECLog                      *log_;
 
     uint8_t audioStatus() const;
     int sendAudioStatus(CEC::cec_logical_address destination=CEC::CECDEVICE_TV);
@@ -64,13 +68,13 @@ private:
     void logResponse(const char *label, const CEC::cec_command &response);
 
 public:
-    CECAudio();
+    CECAudio(CECLog *logger);
     virtual ~CECAudio();
 
     bool init();
 
-    CEC::cec_power_status getTVPower() const {return tv_power_;}
-    CEC::cec_logical_address getActiveAddress() const {return active_device_;}
+    CEC::cec_power_status getTVPower() const {return cec_adapter->GetDevicePowerStatus(CEC::CECDEVICE_TV);}
+    CEC::cec_logical_address getActiveAddress() const {return cec_adapter->GetActiveSource();}
     std::string getActiveName() const {return cec_adapter->GetDeviceOSDName(active_device_);}
 
 public slots:

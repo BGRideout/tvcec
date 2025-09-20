@@ -1,4 +1,5 @@
 #include "cecaudio.h"
+#include "ceclog.h"
 #include <algorithm>
 #include <array>
 #include <QMutexLocker>
@@ -11,7 +12,7 @@ using std::cout;
 using std::endl;
 #include <libcec/cecloader.h>
 
-CECAudio::CECAudio() : tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(CEC::CECDEVICE_UNKNOWN),
+CECAudio::CECAudio(CECLog *logger) : log_(logger), tv_power_(CEC::CEC_POWER_STATUS_STANDBY), active_device_(CEC::CECDEVICE_UNKNOWN),
     log_level_(CEC::CEC_LOG_ERROR), volume_(60), muted_(false)
 {
     cec_config.Clear();
@@ -84,7 +85,7 @@ bool CECAudio::init()
     //  Get the power and active source
     tv_power_ = getTVPower();
     active_device_ = getActiveAddress();
-    qDebug() << "CECAudio initialized. tv_power_" << tv_power_ << "active_device_" << active_device_;
+    log_->print("CECAudio initialized. tv_power_ %d, active_device_ %d", tv_power_, active_device_);
     return true;
 }
 
@@ -101,7 +102,7 @@ void CECAudio::setTv_power(CEC::cec_power_status newTv_power)
     tv_power_ = newTv_power;
     if (log_level_ & CEC::CEC_LOG_DEBUG)
     {
-        std::cout << "TV Power = " << tv_power_ << endl;
+        std::cout << "TV Power = " << cec_adapter->ToString(tv_power_) << " (" << tv_power_ << ")" << endl;
     }
     emit tv_powerChanged(tv_power_);
 }

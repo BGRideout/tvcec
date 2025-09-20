@@ -5,8 +5,10 @@
 #include <QJsonValue>
 #include <iostream>
 
-TVCEC::TVCEC(QObject *parent) : QObject{parent}, volume_(60), volCountAdj_(0), push_to_front_(false), health_(0), just_on_(false)
+TVCEC::TVCEC(QObject *parent) : QObject{parent}, volume_(60), volCountAdj_(0), push_to_front_(false), health_(0)
 {
+    log_ = new CECLog();
+
     remote_ = "tvremote.local";
     websocket_ = new QWebSocket("tvcec");
     connect(websocket_, &QWebSocket::connected, this, &TVCEC::ws_connected);
@@ -14,7 +16,7 @@ TVCEC::TVCEC(QObject *parent) : QObject{parent}, volume_(60), volCountAdj_(0), p
     connect(websocket_, &QWebSocket::textFrameReceived, this, &TVCEC::textMessage);
     connect(websocket_, &QWebSocket::pong, this, &TVCEC::ws_pong);
 
-    cec_ = new CECAudio();
+    cec_ = new CECAudio(log_);
     connect(cec_, &CECAudio::tv_powerChanged, this, &TVCEC::tv_powerChanged, Qt::QueuedConnection);
     connect(cec_, &CECAudio::active_deviceChanged, this, &TVCEC::active_deviceChanged, Qt::QueuedConnection);
     connect(cec_, &CECAudio::volumeUp, this, &TVCEC::volumeUp, Qt::QueuedConnection);
@@ -36,6 +38,7 @@ TVCEC::~TVCEC()
 {
     delete cec_;
     delete websocket_;
+    delete log_;
 }
 
 bool TVCEC::init()
@@ -45,11 +48,11 @@ bool TVCEC::init()
 
 void TVCEC::tv_powerChanged(CEC::cec_power_status power)
 {
-    qDebug() << "Slot tv_powerChanged" << power;
+    log_->print(1, "Slot tv_powerChanged %d", power);
     if (power == CEC::CEC_POWER_STATUS_ON)
     {
         sendButtonClick(("TVOn"));
-        just_on_ = true;
+        cec_->getActiveAddress();
     }
     else if (power == CEC::CEC_POWER_STATUS_STANDBY)
     {
@@ -59,30 +62,20 @@ void TVCEC::tv_powerChanged(CEC::cec_power_status power)
 
 void TVCEC::active_deviceChanged(CEC::cec_logical_address logaddr, std::string name)
 {
-    qDebug() << "Slot active_deviceChanged" << logaddr << name.c_str() << "just on" << just_on_;
-    if (!just_on_ || logaddr == CEC::CECDEVICE_TV)
-    {
-        QJsonObject msg;
-        msg.insert("func", QJsonValue("input_select"));
-        msg.insert("path", QJsonValue("/tvadapter"));
-        msg.insert("address", QJsonValue(logaddr));
-        msg.insert("osdname", QJsonValue(name.c_str()));
-        sendToWebsocket(msg);
-    }
-    else
-    {
-        //  Make TV the active source so audio gets directed properly when
-        //  selecting app on TV
-        cec_->setActive_device(CEC::CECDEVICE_TV);
-    }
-    just_on_ = false;
+    log_->print(1, "Slot active_deviceChanged %d (%s)", logaddr, name.c_str());
+    QJsonObject msg;
+    msg.insert("func", QJsonValue("input_select"));
+    msg.insert("path", QJsonValue("/tvadapter"));
+    msg.insert("address", QJsonValue(logaddr));
+    msg.insert("osdname", QJsonValue(name.c_str()));
+    sendToWebsocket(msg);
 }
 
 void TVCEC::volumeUp(bool pressed)
 {
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
-        qDebug() << "Slot volumeUp" << pressed;
+        log_->print(1, "Slot volumeUp %s", pressed ? "pressed" : "released");
     }
     setMuted(false);
     if (pressed)
@@ -104,7 +97,7 @@ void TVCEC::volumeDown(bool pressed)
 {
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
-        qDebug() << "Slot volumeDown" << pressed;
+        log_->print(1, "Slot volumeDown", pressed ? "pressed" : "released");
     }
     setMuted(false);
     if (pressed)
@@ -126,7 +119,7 @@ void TVCEC::toggleMute()
 {
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
-        qDebug() << "Slot toggleMute";
+        log_->print(1, "Slot toggleMute");
     }
     setMuted(!muted_);
     sendButtonClick("Mute");
@@ -180,7 +173,7 @@ bool TVCEC::sendToWebsocket(const QJsonObject &msg)
     QByteArray txtmsg = doc.toJson(QJsonDocument::Compact);
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
-        qDebug() << txtmsg;
+        log_->print(1, "send: %s", txtmsg.constData());
     }
     time_t now;
     time(&now);
@@ -230,7 +223,7 @@ bool TVCEC::sendQueuedMessages()
     expire -= 30;
     while (!msg_queue_.isEmpty() && msg_queue_.front().queued < expire)
     {
-        qDebug() << "Delete expired message" << msg_queue_.front().msg << "expired" << (expire - msg_queue_.front().queued);
+        log_->print(1, "Delete expired message %s expired %d", qPrintable(msg_queue_.front().msg), (int)(expire - msg_queue_.front().queued));
         msg_queue_.pop_front();
         ret = false;
     }
@@ -242,14 +235,14 @@ bool TVCEC::sendQueuedMessages()
             qint64 sts = websocket_->sendTextMessage(msg_queue_.front().msg);
             if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
             {
-                qDebug() << "Sent" << sts << "bytes of" << msg_queue_.front().msg.size();
+                log_->print(1, "Sent %d bytes of %d", sts, msg_queue_.front().msg.size());
             }
             msg_queue_.pop_front();
         }
     }
     else
     {
-        qDebug() << "Open websocket";
+        log_->print(1, "Open websocket");
         websocket_->open(QUrl("ws://" + remote_ + "/tvcec"));
     }
     return ret;
@@ -260,7 +253,7 @@ void TVCEC::textMessage(const QString &msg)
     QJsonDocument json = QJsonDocument::fromJson(msg.toUtf8());
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
-        qDebug() << "Received:" << msg;
+        log_->print(1, "Received: %s", qPrintable(msg));
     }
     QJsonValue lbl = json.object().value("label");
     if (lbl.isString())
@@ -285,7 +278,7 @@ void TVCEC::textMessage(const QString &msg)
 
 void TVCEC::ws_connected()
 {
-    qDebug() << "Websocket connected" << websocket_->requestUrl();
+    log_->print(1, "Websocket connected %s", qPrintable(websocket_->requestUrl().toString()));
     // Push power status and active device to front of queue
     push_to_front_ = true;
     active_deviceChanged(cec_->getActiveAddress(), cec_->getActiveName());
@@ -299,7 +292,7 @@ void TVCEC::ws_connected()
 
 void TVCEC::ws_disconnected()
 {
-    qDebug() << "websocket disconnected";
+    log_->print(1, "websocket disconnected");
     timer_->stop();
     health_ = 0;
 }
@@ -309,7 +302,7 @@ void TVCEC::ws_pong(quint64 elapsedTime, const QByteArray &payload)
     health_ = 0;
     if (cec_->log_level() & CEC::CEC_LOG_DEBUG)
     {
-        qDebug() << "ping/pong elapsed msec:" <<elapsedTime;
+        log_->print(1, "ping/pong elapsed msec: %lld", elapsedTime);
     }
 }
 
@@ -322,7 +315,7 @@ void TVCEC::healthCheck()
     }
     else
     {
-        qDebug() << "Health check limit reached! Close websocket.";
+        log_->print(1, "Health check limit reached! Close websocket.");
         websocket_->close();
     }
 }
