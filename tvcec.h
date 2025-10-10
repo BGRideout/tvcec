@@ -54,6 +54,7 @@ public:
     void setRemote(const QString &remote) {remote_ = remote;}
     void setLogLevel(CEC::cec_log_level level) {cec_->setLog_level(level);}
     void setLogFile(const char *filename) {log_->setLogFile(filename);}
+    void setLogMask(const uint16_t &mask) {log_->setMask(mask);}
 
 public slots:
     void tv_powerChanged(CEC::cec_power_status power);
