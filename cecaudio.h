@@ -88,6 +88,9 @@ public slots:
     void setVolume(int volume);
     void setMuted(bool muted);
 
+    void sendUserKeyPress(CEC::cec_user_control_code key, int releaseDelay=100);
+    void sendUserKeyRelease();
+
 signals:
     void tv_powerChanged(CEC::cec_power_status power);
     void active_deviceChanged(CEC::cec_logical_address logaddr, std::string name);

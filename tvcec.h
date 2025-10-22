@@ -32,6 +32,8 @@ private:
     bool sendButtonPress(const char *label);
     bool sendButtonRelease(const char *label);
 
+    void doCECCommand(const QJsonObject &obj);
+
     struct MsgQueEntry
     {
         time_t          queued;

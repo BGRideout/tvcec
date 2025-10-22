@@ -152,6 +152,20 @@ void CECAudio::setMuted(bool muted)
     muted_ = muted;
 }
 
+void CECAudio::sendUserKeyPress(CEC::cec_user_control_code key, int releaseDelay)
+{
+    cec_adapter->SendKeypress(active_device(), key);
+    if (releaseDelay > 0)
+    {
+        QTimer::singleShot(releaseDelay, this, &CECAudio::sendUserKeyRelease);
+    }
+}
+
+void CECAudio::sendUserKeyRelease()
+{
+    cec_adapter->SendKeyRelease(active_device());
+}
+
 void CECAudio::audio_status_timeout()
 {
     uint8_t status = audioStatus();

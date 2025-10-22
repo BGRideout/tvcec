@@ -210,6 +210,20 @@ bool TVCEC::sendButtonRelease(const char *label)
     return sendToWebsocket(msg);
 }
 
+void TVCEC::doCECCommand(const QJsonObject &obj)
+{
+    QJsonValue cmd = obj.value("cmd");
+    if (cmd == "root_menu")
+    {
+        cec_->sendUserKeyPress(CEC::CEC_USER_CONTROL_CODE_ROOT_MENU);
+    }
+    else if (cmd == "key_click")
+    {
+        uint16_t val1 = obj.value("val1").toInt();
+        cec_->sendUserKeyPress(static_cast<CEC::cec_user_control_code>(val1));
+    }
+}
+
 bool TVCEC::sendQueuedMessages()
 {
     bool ret = true;
@@ -246,23 +260,34 @@ void TVCEC::textMessage(const QString &msg)
 {
     QJsonDocument json = QJsonDocument::fromJson(msg.toUtf8());
     log_->print(2, "Received: %s", qPrintable(msg));
-    QJsonValue lbl = json.object().value("label");
-    if (lbl.isString())
+    QJsonValue act = json.object().value("action");
+    if (act.isString())
     {
-        QString label = lbl.toString();
-        if (label == "Vol+" || label == "Vol-")
+        if (act == "click" || act == "press" || act == "release")
         {
-            QJsonValue rep = json.object().value("repetitions");
-            if(!rep.isUndefined())
+            QJsonValue lbl = json.object().value("label");
+            if (lbl.isString())
             {
-                int repeat = rep.toString().toInt();
-                adjustVolume(label, repeat);
+                QString label = lbl.toString();
+                if (label == "Vol+" || label == "Vol-")
+                {
+                    QJsonValue rep = json.object().value("repetitions");
+                    if(!rep.isUndefined())
+                    {
+                        int repeat = rep.toString().toInt();
+                        adjustVolume(label, repeat);
+                    }
+                }
+                else if (label == "Mute")
+                {
+                    // Already done in response to CEC
+                    // setMuted(!muted_);
+                }
             }
         }
-        else if (label == "Mute")
+        else if (act == "cec")
         {
-            // Already done in response to CEC
-            // setMuted(!muted_);
+            doCECCommand(json.object());
         }
     }
 }
